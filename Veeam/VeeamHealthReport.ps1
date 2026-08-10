@@ -64,5 +64,6 @@ foreach ($Repo in $Repositories) {
 $HTML += "</body></html>"
 $HTML | Out-File $ReportPath -Force
 
+# PowerShell script that checks the status of your Veeam Backup & Replication jobs and repository storage, then outputs the results into a clean HTML report.
 # Optional: Email the report
 # Send-MailMessage -To $Email_To -From $Email_From -Subject "Veeam Health Report" -BodyAsHtml $HTML -SmtpServer $SMTP_Server
