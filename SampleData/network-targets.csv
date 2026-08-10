@@ -1,0 +1,3 @@
+ComputerName,Description,Ports
+localhost,Local workstation,"135,445"
+8.8.8.8,Google Public DNS,"53"
