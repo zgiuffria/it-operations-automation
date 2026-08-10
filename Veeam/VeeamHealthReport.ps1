@@ -65,5 +65,8 @@ $HTML += "</body></html>"
 $HTML | Out-File $ReportPath -Force
 
 # PowerShell script that checks the status of your Veeam Backup & Replication jobs and repository storage, then outputs the results into a clean HTML report.
-# Optional: Email the report
+# Prerequisites: 
+# Run this script directly on your Veeam Backup & Replication server.  Launch PowerShell as an Administrator.  Ensure the target directory (C:\Reports) exists before executing.
+# Set amount of days to report.
+# Optional:  Modify the SMTP Server, To, and From fields based on your email server.
 # Send-MailMessage -To $Email_To -From $Email_From -Subject "Veeam Health Report" -BodyAsHtml $HTML -SmtpServer $SMTP_Server
