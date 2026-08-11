@@ -3,6 +3,9 @@ $TargetJobName = "Daily VM Backup"
 $Action        = "START" # Options: START, STOP, FORCE-FULL, RETRY
 # ---------------------
 
+# In the post-job settings of Job 1, trigger Job 2
+# Start-VBRJob -Job (Get-VBRJob -Name "Your-Second-Job-Name")
+
 # Load Veeam Module
 Import-Module Veeam.Backup.PowerShell -ErrorAction SilentlyContinue
 
