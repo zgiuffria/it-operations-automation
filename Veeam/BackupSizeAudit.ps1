@@ -1,3 +1,18 @@
+# --- CONFIGURATION ---
+# No manual configuration required. Run directly on the Veeam Server.
+# ---------------------
+
+<#
+.SYNOPSIS
+    Veeam Job-Level Backup Size and Storage Footprint Auditor.
+.DESCRIPTION
+    Loops through active backup chains to calculate actual space used on the backup repositories vs. original raw source sizes, providing data reduction metrics per job.
+.NOTES
+    - How to use: Run the script directly to see an interactive pop-up window of your backup job sizes.
+    - Requirements: Run from an elevated PowerShell console on your target Veeam Backup & Replication server.
+    - Output: Launches an interactive Out-GridView dashboard and falls back to a formatted console table.
+#>
+
 # Load Veeam Module
 Import-Module Veeam.Backup.PowerShell -ErrorAction SilentlyContinue
 
