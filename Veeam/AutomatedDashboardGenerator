@@ -1,0 +1,173 @@
+# --- CONFIGURATION ---
+$ReportPath = "C:\Reports\Veeam_Dashboard.html"
+$DaysToCheck = 1
+# ---------------------
+
+<#
+.SYNOPSIS
+    Veeam Standalone Infrastructure and Performance Dashboard.
+.DESCRIPTION
+    Queries local VBR job runs and repository storage to compile a visual, 
+    interactive HTML dashboard utilizing Chart.js for graphical metrics.
+.NOTES
+    - How to use: Execute directly on your Veeam Backup server.
+    - Requirements: Runs natively inside Windows PowerShell as an Administrator.
+    - Output: Generates a self-contained HTML file viewable in any modern web browser.
+#>
+
+Import-Module Veeam.Backup.PowerShell -ErrorAction SilentlyContinue
+
+# 1. Fetch Ingestion Data
+$TargetDate = (Get-Date).AddDays(-$DaysToCheck)
+$Jobs = Get-VBRJob | Where-Object { $_.GetLatestResult() -ne "None" }
+$Repositories = Get-VBRBackupRepository
+
+# 2. Parse Job Metrics for Graphing
+$SuccessCount = 0
+$WarningCount = 0
+$FailedCount  = 0
+$JobTableRows = ""
+
+foreach ($Job in $Jobs) {
+    $Session = $Job.FindLastSession()
+    if ($Session.CreationTime -ge $TargetDate) {
+        $Status = $Session.Result
+        if ($Status -eq "Success") { $SuccessCount++ }
+        elseif ($Status -eq "Warning") { $WarningCount++ }
+        else { $FailedCount++ }
+        
+        $JobTableRows += "<tr><td>$($Job.Name)</td><td>$($Job.JobType)</td><td>$($Session.CreationTime)</td><td class='$Status'>$Status</td></tr>"
+    }
+}
+
+# 3. Parse Repository Metrics for Graphing
+$RepoLabels = @()
+$RepoUsedData = @()
+$RepoFreeData = @()
+$RepoTableRows = ""
+
+foreach ($Repo in $Repositories) {
+    $Info = $Repo.Info
+    if ($Info.Capacity -gt 0) {
+        $TotalGB = [Math]::Round($Info.Capacity / 1GB, 2)
+        $FreeGB = [Math]::Round($Info.FreeSpace / 1GB, 2)
+        $UsedGB = [Math]::Round($TotalGB - $FreeGB, 2)
+        $PercentFree = [Math]::Round(($FreeGB / $TotalGB) * 100, 1)
+        
+        $RepoLabels += "'$($Repo.Name)'"
+        $RepoUsedData += $UsedGB
+        $RepoFreeData += $FreeGB
+        
+        $RepoTableRows += "<tr><td>$($Repo.Name)</td><td>$($Info.Path)</td><td>$TotalGB GB</td><td>$FreeGB GB</td><td>$PercentFree %</td></tr>"
+    }
+}
+
+$RepoLabelsString = $RepoLabels -join ","
+$RepoUsedString   = $RepoUsedData -join ","
+$RepoFreeString   = $RepoFreeData -join ","
+
+# 4. Generate Responsive HTML with Embedded Charting Engines
+$HTML = @"
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Veeam Performance Dashboard</title>
+    <script src="https://jsdelivr.net"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; margin: 0; padding: 20px; }
+        .header { background: #4CAF50; color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .dashboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(450px, 1fr)); gap: 20px; margin-bottom: 20px; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); min-height: 300px; }
+        h2 { margin-top: 0; color: #333; border-bottom: 2px solid #eaeaea; padding-bottom: 10px; }
+        table { border-collapse: collapse; width: 100%; margin-top: 15px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background-color: #f8f9fa; color: #555; }
+        .Success { color: #2ecc71; font-weight: bold; }
+        .Warning { color: #f39c12; font-weight: bold; }
+        .Failed { color: #e74c3c; font-weight: bold; }
+        .chart-container { position: relative; height: 250px; width: 100%; display: flex; justify-content: center; }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1>Veeam Infrastructure Operations Dashboard</h1>
+    <p>Data Status Tracking Window: Last $DaysToCheck Day(s) | Generated: $(Get-Date)</p>
+</div>
+
+<div class="dashboard-grid">
+    <!-- Job Pie Chart Card -->
+    <div class="card">
+        <h2>Backup Job Status Distribution</h2>
+        <div class="chart-container">
+            <canvas id="jobChart"></canvas>
+        </div>
+    </div>
+    
+    <!-- Repository Bar Chart Card -->
+    <div class="card">
+        <h2>Repository Capacity Mapping (GB)</h2>
+        <div class="chart-container">
+            <canvas id="repoChart"></canvas>
+        </div>
+    </div>
+</div>
+
+<div class="card" style="margin-bottom: 20px;">
+    <h2>Active Workload Run Execution Logs</h2>
+    <table>
+        <thead><tr><th>Job Name</th><th>Type</th><th>Last Execution</th><th>Status</th></tr></thead>
+        <tbody>$JobTableRows</tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h2>Storage Hardware Extent Footprints</h2>
+    <table>
+        <thead><tr><th>Repository Name</th><th>Target Path</th><th>Total Capacity</th><th>Available Free</th><th>Free %</th></tr></thead>
+        <tbody>$RepoTableRows</tbody>
+    </table>
+</div>
+
+<script>
+    // 1. Job Distribution Doughnut Chart Setup
+    const jobCtx = document.getElementById('jobChart').getContext('2d');
+    new Chart(jobCtx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Success', 'Warning', 'Failed'],
+            datasets: [{
+                data: [$SuccessCount, $WarningCount, $FailedCount],
+                backgroundColor: ['#2ecc71', '#f39c12', '#e74c3c']
+            }]
+        },
+        options: { responsive: true, maintainAspectRatio: false }
+    });
+
+    // 2. Storage Stacking Bar Chart Setup
+    const repoCtx = document.getElementById('repoChart').getContext('2d');
+    new Chart(repoCtx, {
+        type: 'bar',
+        data: {
+            labels: [$RepoLabelsString],
+            datasets: [
+                { label: 'Used Space', data: [$RepoUsedString], backgroundColor: '#e74c3c' },
+                { label: 'Free Space', data: [$RepoFreeString], backgroundColor: '#2ecc71' }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: { x: { stacked: true }, y: { stacked: true } }
+        }
+    });
+</script>
+
+</body>
+</html>
+"@
+
+# Write compiled UI layer out to disk
+if (-not (Test-Path (Split-Path $ReportPath))) { New-Item -ItemType Directory -Path (Split-Path $ReportPath) -Force | Out-Null }
+$HTML | Out-File $ReportPath -Force
+Write-Host "Dashboard successfully drawn! View your metrics at: $ReportPath" -ForegroundColor Green
