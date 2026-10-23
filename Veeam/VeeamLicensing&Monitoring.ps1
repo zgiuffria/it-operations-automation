@@ -3,6 +3,17 @@ $ExpirationWarningDays = 30
 $UsageThresholdPercent = 90
 # ---------------------
 
+<#
+.SYNOPSIS
+    Veeam License Inventory and Utilization Monitor.
+.DESCRIPTION
+    Audits active Veeam licensing, tracks expiration dates, and alerts on VUL instance or socket consumption spikes. Generates a native HTML report to disk.
+.NOTES
+    - How to use: Set warning thresholds in the configuration block.
+    - Requirements: Run from an elevated PowerShell session directly on the target Veeam Backup & Replication server.
+    - Output: Displays metrics in console tables and saves an HTML audit summary to C:\Reports\.
+#>
+
 # Load Veeam Module
 Import-Module Veeam.Backup.PowerShell -ErrorAction SilentlyContinue
 
