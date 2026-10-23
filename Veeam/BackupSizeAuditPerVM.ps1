@@ -1,3 +1,18 @@
+# --- CONFIGURATION ---
+# No manual configuration required. Run directly on the Veeam Server.
+# ---------------------
+
+<#
+.SYNOPSIS
+    Veeam Per-VM Storage Footprint and Deduplication Auditor.
+.DESCRIPTION
+    Queries individual restore point metadata across all backup chains to calculate isolated storage consumption, point counts, and data reduction ratios for every protected VM object.
+.NOTES
+    - How to use: Execute the script directly to spin up a filterable graphical grid.
+    - Requirements: Run from an elevated PowerShell console on your target Veeam Backup & Replication server.
+    - Output: Launches an interactive Out-GridView dashboard and outputs a console backup matrix table.
+#>
+
 # Load Veeam Module
 Import-Module Veeam.Backup.PowerShell -ErrorAction SilentlyContinue
 
