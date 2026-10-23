@@ -1,0 +1,24 @@
+# --- CONFIGURATION ---
+# No configuration required. Run directly on the Veeam Server.
+# ---------------------
+
+<#
+.SYNOPSIS
+    Veeam Configuration Database Target Auditor.
+.DESCRIPTION
+    Queries local registry paths to identify the active SQL Server Name, Instance Name, and Database configuration bound to Veeam Backup & Replication.
+.NOTES
+    - Requirements: Run from a standard PowerShell session locally on the Veeam backup server.
+#>
+
+$Path = "HKLM:\SOFTWARE\Veeam\Veeam Backup and Replication"
+
+if (Test-Path $Path) {
+    [PSCustomObject]@{
+        "SQL Server Host" = (Get-ItemProperty -Path $Path -Name "SqlServerName" -ErrorAction SilentlyContinue).SqlServerName
+        "SQL Instance"    = (Get-ItemProperty -Path $Path -Name "SqlInstanceName" -ErrorAction SilentlyContinue).SqlInstanceName
+        "Database Name"   = (Get-ItemProperty -Path $Path -Name "SqlDatabaseName" -ErrorAction SilentlyContinue).SqlDatabaseName
+    } | Format-List
+} else {
+    Write-Error "Veeam Backup & Replication registry path not detected on this machine."
+}
