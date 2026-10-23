@@ -6,6 +6,16 @@ $Email_To = "admin@yourdomain.com"
 $Email_From = "veeam-alerts@yourdomain.com"
 # ---------------------
 
+<#
+.SYNOPSIS
+    Veeam Backup & Replication Job and Repository Health Report.
+.DESCRIPTION
+    Checks the status of Veeam jobs and repository storage, then outputs the results into a clean, formatted HTML report. Includes an optional built-in mail sender line.
+.NOTES
+    - How to use: Set your target export path, days to pull, and email routing settings in the configuration block.
+    - Requirements: Run from an elevated PowerShell session directly on the target Veeam Backup & Replication server. Ensure the target directory (e.g. C:\Reports) exists before executing.
+#>
+
 # Load Veeam Module
 Import-Module Veeam.Backup.PowerShell -ErrorAction SilentlyContinue
 
@@ -64,9 +74,5 @@ foreach ($Repo in $Repositories) {
 $HTML += "</body></html>"
 $HTML | Out-File $ReportPath -Force
 
-# PowerShell script that checks the status of your Veeam Backup & Replication jobs and repository storage, then outputs the results into a clean HTML report.
-# Prerequisites: 
-# Run this script directly on your Veeam Backup & Replication server.  Launch PowerShell as an Administrator.  Ensure the target directory (C:\Reports) exists before executing.
-# Set amount of days to report.
-# Optional:  Modify the SMTP Server, To, and From fields based on your email server.
+# Optional: Un-comment the line below to email the report automatically after generation
 # Send-MailMessage -To $Email_To -From $Email_From -Subject "Veeam Health Report" -BodyAsHtml $HTML -SmtpServer $SMTP_Server
