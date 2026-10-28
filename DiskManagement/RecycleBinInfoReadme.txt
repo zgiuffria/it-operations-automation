@@ -1,4 +1,3 @@
-
 How to Use the Script:
 
 1. Run the EventViewerSumBypassEP.bat file to initiate the script.
