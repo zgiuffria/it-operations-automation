@@ -12,12 +12,6 @@ Outputs are written beneath the repository Reports folder or user profile fallba
 param(
     [string[]]$ComputerName = @($env:COMPUTERNAME),
 
-    [ValidateRange(1, 720)]
-    [int]$Hours = 24,
-
-    [ValidateRange(1, 10000)]
-    [int]$MaxEventsPerLog = 1000,
-
     [string[]]$LogName = @('System', 'Application'),
 
     [pscredential]$Credential
@@ -40,6 +34,20 @@ function Send-ConsoleNotification {
     Write-Host "$dashLine`n" -ForegroundColor $Color
 }
 
+# --- INTERACTIVE HOURS PROMPT ---
+Write-Host "==================================================" -ForegroundColor Cyan
+$hoursInput = Read-Host "Enter the number of hours to pull event logs for [Default: 24]"
+Write-Host "==================================================" -ForegroundColor Cyan
+
+if ([string]::IsNullOrWhiteSpace($hoursInput)) {
+    [int]$Hours = 24
+} elseif ($hoursInput -as [int] -and [int]$hoursInput -ge 1 -and [int]$hoursInput -le 720) {
+    [int]$Hours = [int]$hoursInput
+} else {
+    Send-ConsoleNotification -Title "INVALID INPUT" -Message "Please enter a number between 1 and 720. Defaulting to 24 hours." -Color 'Yellow'
+    [int]$Hours = 24
+}
+
 # Resolve directory paths safely
 $targetDir = '..\..\Reports\CSV'
 if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot $targetDir))) {
@@ -57,7 +65,7 @@ try {
 }
 
 $startTime = (Get-Date).AddHours(-$Hours)
-Write-Host "Scanning event logs..." -ForegroundColor Cyan
+Write-Host "Scanning event logs for the last $Hours hour(s)..." -ForegroundColor Cyan
 
 $events = foreach ($computer in $ComputerName) {
     foreach ($log in $LogName) {
@@ -65,7 +73,7 @@ $events = foreach ($computer in $ComputerName) {
             $params = @{
                 ComputerName = $computer
                 FilterHashtable = @{ LogName = $log; Level = 1,2,3; StartTime = $startTime }
-                MaxEvents = $MaxEventsPerLog
+                MaxEvents = 1000
                 ErrorAction = 'Stop'
             }
             if ($Credential) { $params.Credential = $Credential }
@@ -97,7 +105,6 @@ $events = foreach ($computer in $ComputerName) {
 }
 
 if ($null -ne $events -and ($events | Measure-Object).Count -gt 0) {
-    # Compile raw datasets, formatting the visual time column strings
     $summaryData = $events |
         Group-Object ThreadId, EventId, Provider, Channel, Level |
         ForEach-Object {
@@ -108,6 +115,8 @@ if ($null -ne $events -and ($events | Measure-Object).Count -gt 0) {
             [pscustomobject]@{
                 ThreadId       = $sample.ThreadId
                 RawTime        = $latestDateTime
+                # Split the timestamp into distinct visual columns
+                Date           = $latestDateTime.ToString("yyyy-MM-dd")
                 Time           = $latestDateTime.ToString("HH:mm:ss")
                 EventId        = $sample.EventId
                 ProviderName   = $sample.Provider
@@ -118,7 +127,6 @@ if ($null -ne $events -and ($events | Measure-Object).Count -gt 0) {
             }
         }
 
-    # Sort results by the raw DateTime object descending (most recent first)
     $summary = $summaryData | Sort-Object RawTime -Descending
 
     $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -128,16 +136,17 @@ if ($null -ne $events -and ($events | Measure-Object).Count -gt 0) {
     $events | Export-Csv -Path $detailPath -NoTypeInformation
     $summary | Export-Csv -Path $summaryPath -NoTypeInformation
     
-    # Custom property expression mappings with defined layout widths to prevent truncation
-    $colThreadId   = @{Expression="ThreadId";    Width=10; Alignment="Left"}
-    $colTime       = @{Expression="Time";        Width=12; Alignment="Left"}
-    $colEventId    = @{Expression="EventId";     Width=10; Alignment="Left"}
-    $colProvider   = @{Expression="ProviderName";Width=35; Alignment="Left"}
-    $colChannel    = @{Expression="Channel";     Width=18; Alignment="Left"}
-    $colCount      = @{Expression="Count";       Width=8;  Alignment="Left"}
+    # Custom property expression mappings adjusted for size constraints
+    $colThreadId   = @{Expression="ThreadId";    Width=9;  Alignment="Left"}
+    $colDate       = @{Expression="Date";        Width=12; Alignment="Left"}
+    $colTime       = @{Expression="Time";        Width=10; Alignment="Left"}
+    $colEventId    = @{Expression="EventId";     Width=9;  Alignment="Left"}
+    $colProvider   = @{Expression="ProviderName";Width=30; Alignment="Left"}
+    $colChannel    = @{Expression="Channel";     Width=15; Alignment="Left"}
+    $colCount      = @{Expression="Count";       Width=7;  Alignment="Left"}
 
-    # Output top 25 records to the console using the wider formatting rules
-    $summary | Select-Object -First 25 | Format-Table $colThreadId, $colTime, $colEventId, $colProvider, $colChannel, $colCount
+    # Output top 25 records to the console using the updated layouts
+    $summary | Select-Object -First 25 | Format-Table $colThreadId, $colDate, $colTime, $colEventId, $colProvider, $colChannel, $colCount
     
     Write-Host "`nSummary: $summaryPath" -ForegroundColor Green
     Write-Host "Details: $detailPath" -ForegroundColor Green
