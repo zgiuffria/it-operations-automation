@@ -24,12 +24,26 @@ param(
     [Parameter(Mandatory=$true, ParameterSetName='ServerNames')]
     [ValidateNotNullOrEmpty()]
     [string[]]$VbrServers,
+
     [Parameter(Mandatory=$true, ParameterSetName='ServerList')]
     [ValidateScript({ Test-Path $_ -PathType Leaf })]
     [string]$ServerListCsv,
+
+    # Run on a VBR server and collect from that local VBR installation only.
+    # This parameter set does not use WinRM or PowerShell remoting.
+    [Parameter(Mandatory=$true, ParameterSetName='LocalOnly')]
+    [switch]$LocalOnly,
+
+    # Optional label used only with -LocalOnly. Defaults to the local computer name.
+    [Parameter(ParameterSetName='LocalOnly')]
+    [ValidateNotNullOrEmpty()]
+    [string]$LocalSite = $env:COMPUTERNAME,
+
     [Parameter(Mandatory=$true)]
     [ValidateNotNullOrEmpty()]
     [string]$OutputDirectory,
+
+    # Used only for remote collection. It is ignored by -LocalOnly.
     [pscredential]$Credential
 )
 
@@ -53,15 +67,35 @@ function ConvertTo-HtmlEncoded {
     return [System.Net.WebUtility]::HtmlEncode([string]$Value)
 }
 
-if ($PSCmdlet.ParameterSetName -eq 'ServerList') {
-    $targets = Import-Csv -LiteralPath $ServerListCsv
-    foreach ($target in $targets) {
-        if ([string]::IsNullOrWhiteSpace($target.VBRServer)) { throw "Every row in '$ServerListCsv' must contain VBRServer." }
-        if ([string]::IsNullOrWhiteSpace($target.Site)) { $target.Site = $target.VBRServer }
+# Normalize every input method into new objects that always contain VBRServer and Site.
+# Do not retain Import-Csv objects directly: that avoids a missing .Site property under StrictMode.
+$targets = New-Object System.Collections.Generic.List[object]
+switch ($PSCmdlet.ParameterSetName) {
+    'ServerList' {
+        foreach ($row in @(Import-Csv -LiteralPath $ServerListCsv)) {
+            $serverName = [string]$row.VBRServer
+            $siteName = [string]$row.Site
+            if ([string]::IsNullOrWhiteSpace($serverName)) {
+                throw "Every row in '$ServerListCsv' must contain VBRServer."
+            }
+            if ([string]::IsNullOrWhiteSpace($siteName)) { $siteName = $serverName }
+            $targets.Add([pscustomobject]@{ VBRServer = $serverName.Trim(); Site = $siteName.Trim(); CollectionMode = 'Remote' })
+        }
     }
-} else {
-    $targets = foreach ($server in $VbrServers) { [pscustomobject]@{ VBRServer = $server; Site = $server } }
+    'LocalOnly' {
+        $serverName = [System.Environment]::MachineName
+        $targets.Add([pscustomobject]@{ VBRServer = $serverName; Site = $LocalSite.Trim(); CollectionMode = 'Local' })
+    }
+    default {
+        foreach ($server in $VbrServers) {
+            $serverName = [string]$server
+            if ([string]::IsNullOrWhiteSpace($serverName)) { continue }
+            $serverName = $serverName.Trim()
+            $targets.Add([pscustomobject]@{ VBRServer = $serverName; Site = $serverName; CollectionMode = 'Remote' })
+        }
+    }
 }
+if ($targets.Count -eq 0) { throw 'No VBR server targets were supplied.' }
 
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -69,7 +103,7 @@ $csvPath   = Join-Path $OutputDirectory "VBR_Job_Schedules_$timestamp.csv"
 $htmlPath  = Join-Path $OutputDirectory "VBR_Job_Schedules_$timestamp.html"
 $errorPath = Join-Path $OutputDirectory "VBR_Job_Schedule_Collection_Errors_$timestamp.csv"
 
-# Executes locally on each VBR server through PowerShell remoting.
+# Collector used either locally (-LocalOnly) or inside a remote PowerShell session.
 $remoteCollector = {
     Set-StrictMode -Version Latest
     $ErrorActionPreference = 'Stop'
@@ -168,17 +202,25 @@ $remoteCollector = {
 $allRows = New-Object System.Collections.Generic.List[object]
 $collectionErrors = New-Object System.Collections.Generic.List[object]
 foreach ($target in $targets) {
-    Write-Host "Collecting VBR job inventory from $($target.VBRServer) ..." -ForegroundColor Cyan
+    $serverName = [string]$target.VBRServer
+    $siteName = [string]$target.Site
+    $mode = [string]$target.CollectionMode
+    Write-Host "Collecting VBR job inventory from $serverName ($mode) ..." -ForegroundColor Cyan
     try {
-        $invokeParams = @{ ComputerName=$target.VBRServer; ScriptBlock=$remoteCollector; ErrorAction='Stop' }
-        if ($PSBoundParameters.ContainsKey('Credential')) { $invokeParams.Credential = $Credential }
-        $rows = Invoke-Command @invokeParams
+        if ($mode -eq 'Local') {
+            # Run the same collector directly in the current process. No WinRM session is created.
+            $rows = & $remoteCollector
+        } else {
+            $invokeParams = @{ ComputerName = $serverName; ScriptBlock = $remoteCollector; ErrorAction = 'Stop' }
+            if ($PSBoundParameters.ContainsKey('Credential')) { $invokeParams.Credential = $Credential }
+            $rows = Invoke-Command @invokeParams
+        }
         foreach ($row in @($rows)) {
-            $allRows.Add([pscustomobject]@{ Site=$target.Site; VBRServer=$target.VBRServer; JobName=$row.JobName; JobType=$row.JobType; JobFamily=$row.JobFamily; JobId=$row.JobId; JobEnabled=$row.JobEnabled; ScheduleEnabled=$row.ScheduleEnabled; ScheduleType=$row.ScheduleType; ScheduleSummary=$row.ScheduleSummary; JobDescription=$row.JobDescription; ScheduleSource=$row.ScheduleSource; ScheduleRaw=$row.ScheduleRaw })
+            $allRows.Add([pscustomobject]@{ Site=$siteName; VBRServer=$serverName; JobName=$row.JobName; JobType=$row.JobType; JobFamily=$row.JobFamily; JobId=$row.JobId; JobEnabled=$row.JobEnabled; ScheduleEnabled=$row.ScheduleEnabled; ScheduleType=$row.ScheduleType; ScheduleSummary=$row.ScheduleSummary; JobDescription=$row.JobDescription; ScheduleSource=$row.ScheduleSource; ScheduleRaw=$row.ScheduleRaw })
         }
     } catch {
-        $collectionErrors.Add([pscustomobject]@{ VBRServer=$target.VBRServer; Site=$target.Site; Error=$_.Exception.Message })
-        Write-Warning "Could not collect from $($target.VBRServer): $($_.Exception.Message)"
+        $collectionErrors.Add([pscustomobject]@{ VBRServer=$serverName; Site=$siteName; CollectionMode=$mode; Error=$_.Exception.Message })
+        Write-Warning "Could not collect from $serverName ($mode): $($_.Exception.Message)"
     }
 }
 
