@@ -1,4 +1,4 @@
-README — Get-VBRJobScheduleReport_v2.ps1
+README — Get-VBRJobScheduleReport.ps1
 =========================================
 
 PURPOSE
@@ -12,18 +12,6 @@ Get-VBRJobScheduleReport_v2.ps1 creates a read-only inventory of Veeam Backup
 
 The HTML report supports free-text search, Site and Job Type filtering, and
 column sorting. Site/Location and Job Type use independent color coding.
-
-WHAT CHANGED IN VERSION 2
--------------------------
-1. Site-property fix
-   When -VbrServers is used, the script now explicitly creates a Site label for
-every server. The Site defaults to the same value as VBRServer. This corrects
-the previous "The property 'Site' cannot be found on this object" error.
-
-2. Local-only collection mode
-   -LocalOnly runs the collector directly on the VBR server where the script is
-executed. It does not use WinRM, Invoke-Command, or Enter-PSSession. Use this
-mode when remote PowerShell access is not authorized or is unavailable.
 
 IMPORTANT
 ---------
