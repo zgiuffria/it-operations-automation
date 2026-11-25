@@ -1,158 +1,168 @@
-README — Get-VBRJobScheduleReport.ps1
-======================================
+README — Get-VBRJobScheduleReport_v2.ps1
+=========================================
 
 PURPOSE
 -------
-Get-VBRJobScheduleReport.ps1 collects a read-only inventory of Veeam Backup &
-Replication (VBR) jobs and their schedule information from one or more VBR
-servers. It creates:
+Get-VBRJobScheduleReport_v2.ps1 creates a read-only inventory of Veeam Backup
+& Replication (VBR) jobs and their schedule information. It produces:
 
-  • A sortable and filterable HTML report (primary report)
-  • A CSV export for Excel filtering, sorting, pivot tables, or archival
-  • An errors CSV only when one or more VBR servers cannot be queried
+  * A sortable/filterable HTML report (primary report)
+  * A CSV export for Excel filtering, sorting, pivot tables, or archival
+  * An errors CSV only when a requested VBR server cannot be queried
 
-The report uses color coding for Site/Location and Job Type. In the HTML report,
-you can search, filter by site or job type, and sort by clicking a column header.
+The HTML report supports free-text search, Site and Job Type filtering, and
+column sorting. Site/Location and Job Type use independent color coding.
+
+WHAT CHANGED IN VERSION 2
+-------------------------
+1. Site-property fix
+   When -VbrServers is used, the script now explicitly creates a Site label for
+every server. The Site defaults to the same value as VBRServer. This corrects
+the previous "The property 'Site' cannot be found on this object" error.
+
+2. Local-only collection mode
+   -LocalOnly runs the collector directly on the VBR server where the script is
+executed. It does not use WinRM, Invoke-Command, or Enter-PSSession. Use this
+mode when remote PowerShell access is not authorized or is unavailable.
 
 IMPORTANT
 ---------
-• Run this only from an authorized administrative workstation or server.
-• The script is read-only. It queries Veeam job configuration data; it does not
+* Run only from an authorized administrative workstation or VBR server.
+* The script is read-only. It queries Veeam job configuration; it does not
   create, edit, start, stop, or delete Veeam jobs.
-• Querying each VBR server directly is recommended because its configuration
-  database is the current authoritative source for its jobs and schedules.
-• Test the script against one representative VBR server before running it against
-  all sites.
-• Follow local access, handling, records, and release procedures for all reports.
+* Run VBR queries directly against each VBR server because that server's
+  configuration database is the current source for its job definitions.
+* Test against one representative VBR server before using it at all sites.
+* Follow organizational access, handling, records, and release procedures.
 
 PREREQUISITES
 -------------
-1. The target VBR servers must be reachable from the computer running the script.
-2. PowerShell remoting (WinRM) must be enabled and permitted to each target VBR
-   server, unless running the script locally on that VBR server.
-3. The account used must be authorized to:
-   • connect remotely to the VBR servers; and
-   • query the installed Veeam Backup PowerShell module and VBR configuration.
-4. The Veeam Backup PowerShell module must be installed on each target VBR server.
-   It is normally installed with Veeam Backup & Replication.
-5. You need write permission to the selected output directory.
+All modes
+  1. Run under an account authorized to read Veeam configuration on the VBR
+     server being queried.
+  2. The Veeam Backup PowerShell module must be installed on each target VBR
+     server (normally installed with Veeam Backup & Replication).
+  3. The VBR Backup Service and its configuration database must be available.
+  4. You need write permission to OutputDirectory.
 
-FILES
------
-Get-VBRJobScheduleReport.ps1
-    The PowerShell collection/reporting script.
+Remote modes: -VbrServers or -ServerListCsv
+  1. Each target must be reachable from the computer running the script.
+  2. WinRM/PowerShell remoting must be enabled and authorized for the account.
+  3. Optional -Credential is used for the remote PowerShell session.
 
-Optional server list CSV
-    A CSV file with these exact column names:
+Local mode: -LocalOnly
+  1. Copy the script to the VBR server.
+  2. Log on using an account authorized to query the local Veeam installation.
+  3. No WinRM permission is required because no remote session is made.
 
-    VBRServer,Site
+USAGE — RECOMMENDED WHEN WINRM IS DENIED
+----------------------------------------
+Copy the script to the VBR server, open PowerShell on that server, and run:
 
-    Example:
-    PEN000603MV217,Site-PEN
-    VBR02,Site-02
-    VBR03,Site-03
+  cd C:	emp
+  .
+Get-VBRJobScheduleReport_v2.ps1 -LocalOnly -OutputDirectory C:
+eportsackup
 
-The Site value is used for location labeling and color coding. If you do not use
-a server-list CSV, the script uses each VBR server name as its site label.
+To apply a meaningful site label rather than the local computer name:
 
-QUICK START — SERVER NAMES
---------------------------
-Open PowerShell and run:
+  .
+Get-VBRJobScheduleReport_v2.ps1 -LocalOnly -LocalSite Site-GRL -OutputDirectory C:
+eportsackup
 
-  .\Get-VBRJobScheduleReport.ps1 `
-    -VbrServers VBR01,VBR02,VBR03 `
-    -OutputDirectory C:\Reports\Veeam
+IMPORTANT: The command must remain on one line unless you deliberately use the
+PowerShell line-continuation character (backtick) at the end of preceding lines.
 
-Replace VBR01, VBR02, and VBR03 with your VBR server names or FQDNs.
+USAGE — REMOTE COLLECTION BY SERVER NAME
+----------------------------------------
+Run from an authorized administration system:
 
-RUN WITH ALTERNATE CREDENTIALS
-------------------------------
-If the logged-on account does not have the required remote/Veeam permissions:
+  .
+Get-VBRJobScheduleReport_v2.ps1 -VbrServers VBR01,VBR02,VBR03 -OutputDirectory C:
+eportsackup
 
-  .\Get-VBRJobScheduleReport.ps1 `
-    -VbrServers VBR01,VBR02,VBR03 `
-    -OutputDirectory C:\Reports\Veeam `
-    -Credential (Get-Credential)
+With alternate credentials:
 
-Enter an authorized account when prompted. Do not place passwords in the script,
-a command line, or the server-list CSV.
+  .
+Get-VBRJobScheduleReport_v2.ps1 -VbrServers VBR01,VBR02,VBR03 -OutputDirectory C:
+eportsackup -Credential (Get-Credential)
 
-RUN WITH SITE/LOCATION LABELS
------------------------------
-1. Create a CSV file, for example: C:\Reports\VbrServers.csv
-
-2. Add the exact headers and server/site values:
+USAGE — REMOTE COLLECTION WITH SITE LABELS
+------------------------------------------
+Create a CSV, for example C:
+eportsackup
+eportrange.csv, with exactly these
+headers:
 
   VBRServer,Site
+  GRL003400MV217,Site-GRL
   PEN000603MV217,Site-PEN
-  VBR02,Site-02
   VBR03,Site-03
 
-3. Run:
+Then run:
 
-  .\Get-VBRJobScheduleReport.ps1 `
-    -ServerListCsv C:\Reports\VbrServers.csv `
-    -OutputDirectory C:\Reports\Veeam `
-    -Credential (Get-Credential)
+  .
+Get-VBRJobScheduleReport_v2.ps1 -ServerListCsv C:
+eportsackup
+eportrange.csv -OutputDirectory C:
+eportsackup -Credential (Get-Credential)
 
 OUTPUTS
 -------
-The script writes timestamped files into the OutputDirectory:
+The script creates timestamped files in OutputDirectory:
 
-• VBR-JobScheduleReport_<timestamp>.html
-    Open this in a modern browser. Use the search field and Site/Job Type filters.
-    Click a column header to sort the report.
+  VBR_Job_Schedules_<timestamp>.html
+      Open in a modern browser. Search, filter by Site/Job Type, and click a
+      column heading to sort.
 
-• VBR-JobScheduleReport_<timestamp>.csv
-    Open in Excel for filtering, sorting, pivot tables, or further analysis.
+  VBR_Job_Schedules_<timestamp>.csv
+      Open in Excel for filtering, sorting, pivot tables, or further analysis.
 
-• VBR-JobScheduleReport_Errors_<timestamp>.csv (only if needed)
-    Review this file for servers that could not be reached or queried.
-
-SCHEDULE INFORMATION
---------------------
-Veeam job schedule details vary by job family and installed VBR version. The
-script captures the schedule information exposed by the installed Veeam
-PowerShell API and keeps raw schedule detail available in the report/export for
-review. Review job settings directly in VBR when an exact schedule interpretation
-is mission-critical.
-
-The script may report job families such as standard backup/replication, backup
-copy, SureBackup, tape, Agent policy, and plug-in jobs where their installed
-Veeam cmdlets are available.
-
-Protection-group discovery/rescan schedules are separate from Agent backup policy
-schedules. Review both when troubleshooting managed-agent backup timing.
+  VBR_Job_Schedule_Collection_Errors_<timestamp>.csv
+      Created only if one or more VBR servers could not be collected.
 
 TROUBLESHOOTING
 ---------------
-Cannot connect to a VBR server
-    • Confirm DNS resolution, network reachability, and WinRM/PowerShell remoting.
-    • Confirm the provided account is allowed to remote to the target server.
-    • Check the errors CSV for the detailed exception.
+"Access is denied" from Invoke-Command / Enter-PSSession
+  This is a remote PowerShell authorization problem. The script has not queried
+  Veeam on that target. Either obtain authorized WinRM/PowerShell remoting access
+  or copy the script to the VBR server and use -LocalOnly.
 
-Veeam module/cmdlet error
-    • Confirm Veeam Backup & Replication and its PowerShell module are installed
-      on the target VBR server.
-    • Open PowerShell on the target server and verify that Veeam PowerShell
-      commands are available under the account used.
+"The property 'Site' cannot be found"
+  Use this version 2 script. It normalizes every target into a VBRServer, Site,
+and CollectionMode object before collection.
 
-Some job types are absent
-    • The VBR version may use different cmdlets, or the job family may not be
-      installed/configured on that VBR server.
-    • Check the CSV and error output, then compare with the VBR console.
+Local-only mode reports a Veeam module/cmdlet error
+  Confirm you are actually on a VBR server and that the Veeam Backup PowerShell
+  module is installed. Also check that the Veeam Backup Service and its SQL
+  configuration database are healthy.
 
-HTML report opens but appears incomplete
-    • Verify that the CSV has rows for the expected VBR servers.
-    • Check the errors CSV for collection failures.
-    • Verify you are opening the newest timestamped report.
+Report is empty or incomplete
+  Review the errors CSV. For a local run, confirm Veeam PowerShell cmdlets work
+  under the account executing the script. For remote runs, first test the exact
+  remote session with:
 
-SECURITY AND OPERATIONS NOTES
------------------------------
-• Do not modify the script to embed passwords, tokens, or other credentials.
-• Store reports only in approved locations and apply organizational handling and
-  access controls appropriate to the collected environment data.
-• Review results for accuracy before using them for scheduling, maintenance, or
-  operational decisions.
-• The report is an inventory aid; it does not replace VBR-console verification or
-  administrator review.
+  Enter-PSSession -ComputerName VBR01 -Credential (Get-Credential)
+
+Some job types are not present
+  Job cmdlets vary by VBR release and installed components. Compare results with
+the local VBR console and review whether the applicable job family is installed.
+
+SCHEDULE NOTES
+--------------
+The Veeam PowerShell API can expose schedule properties differently across job
+families and VBR versions. The script records the schedule information returned
+by the locally installed API and exposes raw schedule detail through the HTML
+report and CSV. Confirm critical schedules directly in VBR.
+
+Protection-group discovery/rescan schedules are separate from Veeam Agent backup
+policy schedules. Review both when diagnosing endpoint backup timing.
+
+SECURITY NOTES
+--------------
+* Do not place passwords, tokens, or credentials in the script, command line,
+  or server-list CSV.
+* Store the generated reports only in approved locations.
+* Review output before using it for scheduling, maintenance, or operations.
+* Sign the script after final review if organizational policy requires it. Any
+  modification after signing invalidates the signature.
