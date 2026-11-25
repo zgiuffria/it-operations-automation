@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Collects job and schedule inventory from multiple Veeam Backup & Replication (VBR)
+  Collects job and schedule inventory, including readable start times and run days, from multiple Veeam Backup & Replication (VBR)
   servers and produces a sortable HTML report plus a CSV data export.
 
 .DESCRIPTION
@@ -123,34 +123,58 @@ $remoteCollector = {
         return $null
     }
 
+    function Get-LocalValue {
+        param([object]$Object, [string[]]$Names)
+        if ($null -eq $Object) { return $null }
+        foreach ($name in $Names) {
+            $property = $Object.PSObject.Properties[$name]
+            if ($null -ne $property -and $null -ne $property.Value) { return $property.Value }
+        }
+        return $null
+    }
+    function Format-LocalValue {
+        param([object]$Value)
+        if ($null -eq $Value) { return $null }
+        if ($Value -is [datetime]) { return $Value.ToString('yyyy-MM-dd HH:mm:ss') }
+        if ($Value -is [timespan]) { return $Value.ToString() }
+        if ($Value -is [System.Array] -or $Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) { return (@($Value | ForEach-Object { $_.ToString() }) -join ', ') }
+        return $Value.ToString()
+    }
+
     function Get-ScheduleSummary {
         param([object]$Job)
+        # Agent policy jobs expose usable schedule values directly in Job.ScheduleOptions.
         $schedule = $null; $scheduleSource = $null
-        try {
-            $schedule = Get-VBRJobScheduleOptions -Job $Job -ErrorAction Stop
-            $scheduleSource = 'Get-VBRJobScheduleOptions'
-        } catch {
-            foreach ($propertyName in @('ScheduleOptions','Schedule','ScheduleSettings')) {
-                $property = $Job.PSObject.Properties[$propertyName]
-                if ($null -ne $property -and $null -ne $property.Value) {
-                    $schedule = $property.Value; $scheduleSource = "Job.$propertyName"; break
-                }
+        foreach ($propertyName in @('ScheduleOptions','Schedule','ScheduleSettings')) {
+            $property = $Job.PSObject.Properties[$propertyName]
+            if ($null -ne $property -and $null -ne $property.Value) {
+                $schedule = $property.Value; $scheduleSource = "Job.$propertyName"; break
             }
         }
         if ($null -eq $schedule) {
-            return [pscustomobject]@{ ScheduleEnabled=$null; ScheduleType='Not returned by installed Veeam PowerShell API'; ScheduleSummary='Review this job in the VBR console.'; ScheduleRaw=$null; ScheduleSource=$scheduleSource }
+            try { $schedule = Get-VBRJobScheduleOptions -Job $Job -ErrorAction Stop; $scheduleSource = 'Get-VBRJobScheduleOptions' } catch { }
+        }
+        if ($null -eq $schedule) {
+            return [pscustomobject]@{ ScheduleEnabled=$null; ScheduleType='Not returned by installed Veeam PowerShell API'; StartTime=$null; Days=$null; NextRunTime=$null; LatestRunTime=(Format-LocalValue (Get-LocalValue $Job @('LatestRunLocal','LatestRunTime'))); RetryCount=$null; RetryDelay=$null; ScheduleSummary='Review this job in the VBR console.'; ScheduleRaw=$null; ScheduleSource=$scheduleSource }
         }
 
         $enabled = Get-LocalTextProperty $schedule @('Enabled','Enable','IsEnabled')
+        if ($null -eq $enabled) { $enabled = Get-LocalTextProperty $Job @('IsScheduleEnabled','ScheduleEnabled') }
+        $startTime = Format-LocalValue (Get-LocalValue $schedule @('StartTime','Time','At'))
+        $nextRunTime = Format-LocalValue (Get-LocalValue $schedule @('NextRunTime','NextRunLocal'))
+        $latestRunTime = Format-LocalValue (Get-LocalValue $schedule @('LatestRunTime','LatestRunLocal'))
+        if ($null -eq $latestRunTime) { $latestRunTime = Format-LocalValue (Get-LocalValue $Job @('LatestRunLocal','LatestRunTime')) }
+        $retryCount = Format-LocalValue (Get-LocalValue $schedule @('RetryTimes','RetryCount','RetryAttempts'))
+        $retryDelay = Format-LocalValue (Get-LocalValue $schedule @('RetryTimeout','RetryDelay','RetryInterval'))
         $daily = $schedule.PSObject.Properties['DailyOptions']
         $monthly = $schedule.PSObject.Properties['MonthlyOptions']
         $periodic = $schedule.PSObject.Properties['PeriodicallyOptions']
         $after = Get-LocalTextProperty $schedule @('AfterJob','AfterThisJob','Job')
-        $type = 'Configured'; $parts = New-Object System.Collections.Generic.List[string]
+        $type = 'Configured'; $day = $null; $parts = New-Object System.Collections.Generic.List[string]
         if ($null -ne $enabled) { $parts.Add("Enabled=$enabled") }
         if ($null -ne $daily -and $null -ne $daily.Value) {
             $type = 'Daily/Weekly'
-            $day = Get-LocalTextProperty $daily.Value @('DayOfWeek','Days','WeekDays'); $time = Get-LocalTextProperty $daily.Value @('Period','Time','At')
+            $day = Get-LocalTextProperty $daily.Value @('Days','DayOfWeek','WeekDays'); $time = Get-LocalTextProperty $daily.Value @('StartTime','Period','Time','At'); if ($null -eq $startTime -and $time) { $startTime = $time }
             if ($day) { $parts.Add("Days=$day") }; if ($time) { $parts.Add("Time=$time") }
         }
         if ($null -ne $monthly -and $null -ne $monthly.Value) {
@@ -165,7 +189,7 @@ $remoteCollector = {
         }
         if ($after) { $type = 'After another job'; $parts.Add("After=$after") }
         $raw = $schedule | ConvertTo-Json -Depth 8 -Compress -ErrorAction SilentlyContinue
-        [pscustomobject]@{ ScheduleEnabled=$enabled; ScheduleType=$type; ScheduleSummary=($parts -join '; '); ScheduleRaw=$raw; ScheduleSource=$scheduleSource }
+        [pscustomobject]@{ ScheduleEnabled=$enabled; ScheduleType=$type; StartTime=$startTime; Days=$day; NextRunTime=$nextRunTime; LatestRunTime=$latestRunTime; RetryCount=$retryCount; RetryDelay=$retryDelay; ScheduleSummary=($parts -join '; '); ScheduleRaw=$raw; ScheduleSource=$scheduleSource }
     }
 
     # Get-VBRJob does not include every family, so query each installed cmdlet.
@@ -187,12 +211,12 @@ $remoteCollector = {
             $key = "$($source.Name)|$id|$name"
             if ($seen.ContainsKey($key)) { continue }; $seen[$key] = $true
             $schedule = Get-ScheduleSummary -Job $job
-            $jobType = Get-LocalTextProperty $job @('JobType','Type'); if ([string]::IsNullOrWhiteSpace($jobType)) { $jobType = $source.Name }
+            $jobType = Get-LocalTextProperty $job @('TypeToString','JobType','Type'); if ([string]::IsNullOrWhiteSpace($jobType)) { $jobType = $source.Name }
             [pscustomobject]@{
                 JobName=$name; JobType=$jobType; JobFamily=$source.Name; JobId=$id
                 JobDescription=(Get-LocalTextProperty $job @('Description'))
                 JobEnabled=(Get-LocalTextProperty $job @('IsScheduleEnabled','Enabled','IsEnabled'))
-                ScheduleEnabled=$schedule.ScheduleEnabled; ScheduleType=$schedule.ScheduleType
+                ScheduleEnabled=$schedule.ScheduleEnabled; ScheduleType=$schedule.ScheduleType; StartTime=$schedule.StartTime; Days=$schedule.Days; NextRunTime=$schedule.NextRunTime; LatestRunTime=$schedule.LatestRunTime; RetryCount=$schedule.RetryCount; RetryDelay=$schedule.RetryDelay
                 ScheduleSummary=$schedule.ScheduleSummary; ScheduleSource=$schedule.ScheduleSource; ScheduleRaw=$schedule.ScheduleRaw
             }
         }
@@ -216,7 +240,7 @@ foreach ($target in $targets) {
             $rows = Invoke-Command @invokeParams
         }
         foreach ($row in @($rows)) {
-            $allRows.Add([pscustomobject]@{ Site=$siteName; VBRServer=$serverName; JobName=$row.JobName; JobType=$row.JobType; JobFamily=$row.JobFamily; JobId=$row.JobId; JobEnabled=$row.JobEnabled; ScheduleEnabled=$row.ScheduleEnabled; ScheduleType=$row.ScheduleType; ScheduleSummary=$row.ScheduleSummary; JobDescription=$row.JobDescription; ScheduleSource=$row.ScheduleSource; ScheduleRaw=$row.ScheduleRaw })
+            $allRows.Add([pscustomobject]@{ Site=$siteName; VBRServer=$serverName; JobName=$row.JobName; JobType=$row.JobType; JobFamily=$row.JobFamily; JobId=$row.JobId; JobEnabled=$row.JobEnabled; ScheduleEnabled=$row.ScheduleEnabled; ScheduleType=$row.ScheduleType; StartTime=$row.StartTime; Days=$row.Days; NextRunTime=$row.NextRunTime; LatestRunTime=$row.LatestRunTime; RetryCount=$row.RetryCount; RetryDelay=$row.RetryDelay; ScheduleSummary=$row.ScheduleSummary; JobDescription=$row.JobDescription; ScheduleSource=$row.ScheduleSource; ScheduleRaw=$row.ScheduleRaw })
         }
     } catch {
         $collectionErrors.Add([pscustomobject]@{ VBRServer=$serverName; Site=$siteName; CollectionMode=$mode; Error=$_.Exception.Message })
@@ -230,8 +254,8 @@ if ($collectionErrors.Count -gt 0) { $collectionErrors | Export-Csv -LiteralPath
 
 $siteColors = New-ColorMap ($reportRows.Site); $typeColors = New-ColorMap ($reportRows.JobType)
 $rowsHtml = foreach ($row in $reportRows) {
-    $site=ConvertTo-HtmlEncoded $row.Site; $server=ConvertTo-HtmlEncoded $row.VBRServer; $name=ConvertTo-HtmlEncoded $row.JobName; $type=ConvertTo-HtmlEncoded $row.JobType; $family=ConvertTo-HtmlEncoded $row.JobFamily; $enabled=ConvertTo-HtmlEncoded $row.JobEnabled; $scheduleEnabled=ConvertTo-HtmlEncoded $row.ScheduleEnabled; $scheduleType=ConvertTo-HtmlEncoded $row.ScheduleType; $summary=ConvertTo-HtmlEncoded $row.ScheduleSummary; $description=ConvertTo-HtmlEncoded $row.JobDescription; $raw=ConvertTo-HtmlEncoded $row.ScheduleRaw
-    "<tr><td style='background:$($siteColors[$row.Site])'>$site</td><td>$server</td><td>$name</td><td style='background:$($typeColors[$row.JobType])'>$type</td><td>$family</td><td>$enabled</td><td>$scheduleEnabled</td><td>$scheduleType</td><td>$summary</td><td>$description</td><td title='$raw'>$(if ($raw) {'Hover for raw schedule data'} else {''})</td></tr>"
+    $site=ConvertTo-HtmlEncoded $row.Site; $server=ConvertTo-HtmlEncoded $row.VBRServer; $name=ConvertTo-HtmlEncoded $row.JobName; $type=ConvertTo-HtmlEncoded $row.JobType; $family=ConvertTo-HtmlEncoded $row.JobFamily; $enabled=ConvertTo-HtmlEncoded $row.JobEnabled; $scheduleEnabled=ConvertTo-HtmlEncoded $row.ScheduleEnabled; $scheduleType=ConvertTo-HtmlEncoded $row.ScheduleType; $startTime=ConvertTo-HtmlEncoded $row.StartTime; $days=ConvertTo-HtmlEncoded $row.Days; $nextRun=ConvertTo-HtmlEncoded $row.NextRunTime; $latestRun=ConvertTo-HtmlEncoded $row.LatestRunTime; $retries=ConvertTo-HtmlEncoded $row.RetryCount; $retryDelay=ConvertTo-HtmlEncoded $row.RetryDelay; $summary=ConvertTo-HtmlEncoded $row.ScheduleSummary; $description=ConvertTo-HtmlEncoded $row.JobDescription; $raw=ConvertTo-HtmlEncoded $row.ScheduleRaw
+    "<tr><td style='background:$($siteColors[$row.Site])'>$site</td><td>$server</td><td>$name</td><td style='background:$($typeColors[$row.JobType])'>$type</td><td>$family</td><td>$enabled</td><td>$scheduleEnabled</td><td>$scheduleType</td><td>$startTime</td><td>$days</td><td>$nextRun</td><td>$latestRun</td><td>$retries</td><td>$retryDelay</td><td>$summary</td><td>$description</td><td title='$raw'>$(if ($raw) {'Hover for raw schedule data'} else {''})</td></tr>"
 }
 $errorHtml = if ($collectionErrors.Count -gt 0) {
     $items = foreach ($error in $collectionErrors) { "<li><strong>$(ConvertTo-HtmlEncoded $error.VBRServer)</strong> ($(ConvertTo-HtmlEncoded $error.Site)): $(ConvertTo-HtmlEncoded $error.Error)</li>" }
@@ -243,7 +267,7 @@ $html = @"
 body{font-family:Segoe UI,Arial,sans-serif;margin:24px;color:#1f2937}h1{margin-bottom:4px}.meta{color:#4b5563;margin-top:0}.controls{display:flex;gap:12px;flex-wrap:wrap;margin:20px 0}input,select{padding:7px;border:1px solid #9ca3af;border-radius:4px;min-width:220px}table{border-collapse:collapse;width:100%;font-size:13px}th{background:#16365c;color:white;cursor:pointer;position:sticky;top:0;text-align:left}th,td{border:1px solid #cbd5e1;padding:7px 8px;vertical-align:top}tbody tr:nth-child(even) td:not([style]){background:#f8fafc}.legend{font-size:12px;color:#4b5563}.warning{margin:14px 0;padding:12px;border-left:5px solid #b45309;background:#fffbeb}.count{font-weight:600}
 </style></head><body><h1>Veeam Backup &amp; Replication Job Schedule Inventory</h1><p class="meta">Generated $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss K') | $($reportRows.Count) job records collected from $($targets.Count) requested VBR server(s).</p>$errorHtml
 <div class="controls"><input id="search" placeholder="Search any column" oninput="filterRows()"><select id="siteFilter" onchange="filterRows()"><option value="">All sites</option></select><select id="typeFilter" onchange="filterRows()"><option value="">All job types</option></select><span class="count" id="count"></span></div><p class="legend">Click a column heading to sort. Site cells and job-type cells are color-coded independently. Hover over “raw schedule data” for the schedule object returned by the installed Veeam PowerShell API.</p>
-<table id="report"><thead><tr><th>Site</th><th>VBR Server</th><th>Job Name</th><th>Job Type</th><th>Job Family</th><th>Job Enabled</th><th>Schedule Enabled</th><th>Schedule Type</th><th>Schedule Summary</th><th>Description</th><th>API Detail</th></tr></thead><tbody>$($rowsHtml -join "`n")</tbody></table>
+<table id="report"><thead><tr><th>Site</th><th>VBR Server</th><th>Job Name</th><th>Job Type</th><th>Job Family</th><th>Job Enabled</th><th>Schedule Enabled</th><th>Schedule Type</th><th>Start Time</th><th>Run Days</th><th>Next Run</th><th>Latest Run</th><th>Retries</th><th>Retry Delay</th><th>Schedule Summary</th><th>Description</th><th>API Detail</th></tr></thead><tbody>$($rowsHtml -join "`n")</tbody></table>
 <script>
 const table=document.getElementById('report');function addOptions(id,col){const s=document.getElementById(id),v=[...new Set([...table.tBodies[0].rows].map(r=>r.cells[col].innerText).filter(Boolean))].sort();v.forEach(x=>{const o=document.createElement('option');o.value=x;o.textContent=x;s.appendChild(o)})}function filterRows(){const text=document.getElementById('search').value.toLowerCase(),site=document.getElementById('siteFilter').value,type=document.getElementById('typeFilter').value;let shown=0;[...table.tBodies[0].rows].forEach(r=>{const show=r.innerText.toLowerCase().includes(text)&&(!site||r.cells[0].innerText===site)&&(!type||r.cells[3].innerText===type);r.style.display=show?'':'none';if(show)shown++});document.getElementById('count').textContent=shown+' displayed'}[...table.tHead.rows[0].cells].forEach((th,n)=>th.addEventListener('click',()=>{const rows=[...table.tBodies[0].rows],asc=th.dataset.order!=='asc';rows.sort((a,b)=>a.cells[n].innerText.localeCompare(b.cells[n].innerText,undefined,{numeric:true})*(asc?1:-1));rows.forEach(r=>table.tBodies[0].appendChild(r));[...table.tHead.rows[0].cells].forEach(h=>delete h.dataset.order);th.dataset.order=asc?'asc':'desc'}));addOptions('siteFilter',0);addOptions('typeFilter',3);filterRows();
 </script></body></html>
