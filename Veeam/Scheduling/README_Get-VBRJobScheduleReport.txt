@@ -3,7 +3,7 @@ README — Get-VBRJobScheduleReport.ps1
 
 PURPOSE
 -------
-Get-VBRJobScheduleReport_v2.ps1 creates a read-only inventory of Veeam Backup
+Get-VBRJobScheduleReport.ps1 creates a read-only inventory of Veeam Backup
 & Replication (VBR) jobs and their schedule information. It produces:
 
   * A sortable/filterable HTML report (primary report)
@@ -49,13 +49,13 @@ Copy the script to the VBR server, open PowerShell on that server, and run:
 
   cd C:	emp
   .
-Get-VBRJobScheduleReport_v2.ps1 -LocalOnly -OutputDirectory C:
+Get-VBRJobScheduleReport.ps1 -LocalOnly -OutputDirectory C:
 eportsackup
 
 To apply a meaningful site label rather than the local computer name:
 
   .
-Get-VBRJobScheduleReport_v2.ps1 -LocalOnly -LocalSite Site-GRL -OutputDirectory C:
+Get-VBRJobScheduleReport.ps1 -LocalOnly -LocalSite Site-GRL -OutputDirectory C:
 eportsackup
 
 IMPORTANT: The command must remain on one line unless you deliberately use the
@@ -66,13 +66,13 @@ USAGE — REMOTE COLLECTION BY SERVER NAME
 Run from an authorized administration system:
 
   .
-Get-VBRJobScheduleReport_v2.ps1 -VbrServers VBR01,VBR02,VBR03 -OutputDirectory C:
+Get-VBRJobScheduleReport.ps1 -VbrServers VBR01,VBR02,VBR03 -OutputDirectory C:
 eportsackup
 
 With alternate credentials:
 
   .
-Get-VBRJobScheduleReport_v2.ps1 -VbrServers VBR01,VBR02,VBR03 -OutputDirectory C:
+Get-VBRJobScheduleReport.ps1 -VbrServers VBR01,VBR02,VBR03 -OutputDirectory C:
 eportsackup -Credential (Get-Credential)
 
 USAGE — REMOTE COLLECTION WITH SITE LABELS
@@ -90,7 +90,7 @@ headers:
 Then run:
 
   .
-Get-VBRJobScheduleReport_v2.ps1 -ServerListCsv C:
+Get-VBRJobScheduleReport.ps1 -ServerListCsv C:
 eportsackup
 eportrange.csv -OutputDirectory C:
 eportsackup -Credential (Get-Credential)
@@ -115,10 +115,6 @@ TROUBLESHOOTING
   This is a remote PowerShell authorization problem. The script has not queried
   Veeam on that target. Either obtain authorized WinRM/PowerShell remoting access
   or copy the script to the VBR server and use -LocalOnly.
-
-"The property 'Site' cannot be found"
-  Use this version 2 script. It normalizes every target into a VBRServer, Site,
-and CollectionMode object before collection.
 
 Local-only mode reports a Veeam module/cmdlet error
   Confirm you are actually on a VBR server and that the Veeam Backup PowerShell
